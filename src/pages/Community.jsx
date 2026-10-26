@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { COMMUNITY_POSTS, LANGUAGES } from '../data/mockData';
+import { LANGUAGES } from '../data/mockData';
 import { useAuth } from '../context/AppContext';
 import { postsApi } from '../api/client';
 import {
@@ -17,7 +17,7 @@ import {
 
 export default function Community() {
   const { user } = useAuth();
-  const [posts, setPosts] = useState(COMMUNITY_POSTS);
+  const [posts, setPosts] = useState([]);
   const [filterLang, setFilterLang] = useState('all');
   const [showComposer, setShowComposer] = useState(false);
   const [newPost, setNewPost] = useState('');
@@ -76,27 +76,11 @@ export default function Community() {
     try {
       const res = await postsApi.create(newPost, selectedLang, []);
       setPosts([res, ...posts]);
-    } catch {
-      // 后端失败，走本地
-      const post = {
-        id: Date.now(),
-        user: {
-          name: user?.username || '匿名用户',
-          avatar: user?.avatar || '👤',
-          level: 'A2',
-          language: selectedLang,
-        },
-        time: '刚刚',
-        content: newPost,
-        likes: 0,
-        isLiked: false,
-        comments: [],
-        tags: [],
-      };
-      setPosts([post, ...posts]);
+      setNewPost('');
+      setShowComposer(false);
+    } catch (e) {
+      alert(e.message || '发帖失败，请重试');
     }
-    setNewPost('');
-    setShowComposer(false);
   };
 
   const filteredPosts =
@@ -167,26 +151,26 @@ export default function Community() {
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Stats — 装饰性占位，后端暂未提供统计接口 */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-xl p-4 text-center shadow-sm">
             <div className="flex items-center justify-center gap-1 text-primary-600 mb-1">
               <Users className="w-4 h-4" />
-              <span className="font-bold text-lg">12,580</span>
+              <span className="font-bold text-lg">--</span>
             </div>
             <p className="text-xs text-slate-500">在线学习者</p>
           </div>
           <div className="bg-white rounded-xl p-4 text-center shadow-sm">
             <div className="flex items-center justify-center gap-1 text-accent-500 mb-1">
               <MessageCircle className="w-4 h-4" />
-              <span className="font-bold text-lg">3,241</span>
+              <span className="font-bold text-lg">{posts.length}</span>
             </div>
-            <p className="text-xs text-slate-500">今日讨论</p>
+            <p className="text-xs text-slate-500">动态总数</p>
           </div>
           <div className="bg-white rounded-xl p-4 text-center shadow-sm">
             <div className="flex items-center justify-center gap-1 text-green-500 mb-1">
               <TrendingUp className="w-4 h-4" />
-              <span className="font-bold text-lg">+15%</span>
+              <span className="font-bold text-lg">--</span>
             </div>
             <p className="text-xs text-slate-500">活跃增长</p>
           </div>
@@ -281,10 +265,10 @@ function PostCard({ post, onLike }) {
     try {
       const res = await postsApi.addComment(post.id, newComment);
       setComments([...comments, res]);
-    } catch {
-      setComments([...comments, { user: '我', content: newComment }]);
+      setNewComment('');
+    } catch (e) {
+      alert(e.message || '评论失败，请重试');
     }
-    setNewComment('');
   };
 
   const lang = LANGUAGES.find((l) => l.id === post.user.language);

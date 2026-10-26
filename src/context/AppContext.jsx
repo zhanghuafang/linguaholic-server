@@ -27,60 +27,18 @@ export const AuthProvider = ({ children }) => {
   }, [user]);
 
   const register = async (username, email, password) => {
-    try {
-      const res = await authApi.register(username, email, password);
-      setToken(res.token);
-      setUser(res.user);
-      return res.user;
-    } catch (e) {
-      // 网络错误（Worker 被墙时）回退到本地 mock；4xx/5xx 鉴权错误不回退
-      if (isNetworkError(e)) {
-        console.warn('后端不可达，回退到本地 mock:', e.message);
-        const newUser = {
-          id: Date.now(),
-          username,
-          email,
-          avatar: username[0].toUpperCase(),
-          joinedAt: new Date().toISOString(),
-          localMock: true,
-        };
-        setUser(newUser);
-        return newUser;
-      }
-      throw e;
-    }
+    const res = await authApi.register(username, email, password);
+    setToken(res.token);
+    setUser(res.user);
+    return res.user;
   };
 
   const login = async (email, password) => {
-    try {
-      const res = await authApi.login(email, password);
-      setToken(res.token);
-      setUser(res.user);
-      return res.user;
-    } catch (e) {
-      // 网络错误回退；401（密码错误）等鉴权错误不回退
-      if (isNetworkError(e)) {
-        console.warn('后端不可达，回退到本地 mock:', e.message);
-        const demoUser = {
-          id: Date.now(),
-          username: '语言达人',
-          email: email || 'demo@linguaholic.com',
-          avatar: '语',
-          joinedAt: new Date().toISOString(),
-          localMock: true,
-        };
-        setUser(demoUser);
-        return demoUser;
-      }
-      throw e;
-    }
+    const res = await authApi.login(email, password);
+    setToken(res.token);
+    setUser(res.user);
+    return res.user;
   };
-
-  // 判断是否为网络层错误（超时、DNS 失败、CORS 被墙等），不是业务错误
-  function isNetworkError(err) {
-    const msg = (err?.message || '').toLowerCase();
-    return msg.includes('failed to fetch') || msg.includes('network') || msg.includes('timeout') || msg.includes('aborted');
-  }
 
   const logout = () => {
     // 清当前用户的本地进度缓存（切换账号时不串数据）

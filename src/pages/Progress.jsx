@@ -15,19 +15,20 @@ import {
 export default function Progress() {
   const { progress } = useProgress();
 
-  const totalMinutes = progress.totalStudyTime;
+  const totalMinutes = progress.totalStudyTime || 0;
   const hours = Math.floor(totalMinutes / 60);
   const mins = totalMinutes % 60;
 
-  // 计算周统计
-  const weeklyTotal = progress.weeklyActivity.reduce((sum, d) => sum + d.minutes, 0);
+  // 计算周统计（防御空数组）
+  const weeklyActivity = progress.weeklyActivity || [];
+  const weeklyTotal = weeklyActivity.reduce((sum, d) => sum + (d.minutes || 0), 0);
   const weeklyGoal = 120; // 假设周目标
   const weeklyPercentage = Math.min((weeklyTotal / weeklyGoal) * 100, 100);
-  const maxMinutes = Math.max(...progress.weeklyActivity.map(d => d.minutes));
+  const maxMinutes = weeklyActivity.length > 0 ? Math.max(...weeklyActivity.map(d => d.minutes || 0)) : 0;
 
   // 计算单词掌握率
-  const wordMasterRate = progress.wordsLearned > 0
-    ? Math.round((progress.wordsMastered / progress.wordsLearned) * 100)
+  const wordMasterRate = (progress.wordsLearned || 0) > 0
+    ? Math.round(((progress.wordsMastered || 0) / progress.wordsLearned) * 100)
     : 0;
 
   return (
@@ -43,29 +44,21 @@ export default function Progress() {
           icon={<Clock className="w-6 h-6 text-primary-500" />}
           label="总学习时长"
           value={`${hours}h ${mins}m`}
-          trend="+12%"
-          trendUp
         />
         <StatCard
           icon={<Flame className="w-6 h-6 text-orange-500" />}
           label="连续学习"
-          value={`${progress.streakDays}天`}
-          trend="保持"
-          trendUp
+          value={`${progress.streakDays || 0}天`}
         />
         <StatCard
           icon={<Target className="w-6 h-6 text-green-500" />}
           label="单词掌握率"
           value={`${wordMasterRate}%`}
-          trend="+8%"
-          trendUp
         />
         <StatCard
           icon={<Award className="w-6 h-6 text-yellow-500" />}
           label="等级"
-          value={`Lv.${progress.level}`}
-          trend={`${progress.xpPoints} XP`}
-          trendUp
+          value={`Lv.${progress.level || 1}`}
         />
       </div>
 
@@ -157,16 +150,14 @@ export default function Progress() {
                     />
                   </div>
                   <div className="flex items-center gap-4 text-xs text-slate-500">
-                    <span>今日已学 {langProgress.todayStudied} 分钟</span>
-                    <span>·</span>
-                    <span>目标 {langProgress.dailyGoal} 分钟</span>
+                    <span>今日已学 {langProgress.todayStudied || 0} 分钟</span>
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-lg font-bold" style={{ color: lang.color }}>
-                    {Math.round((langProgress.todayStudied / langProgress.dailyGoal) * 100)}%
+                    {langProgress.progress || 0}%
                   </div>
-                  <div className="text-xs text-slate-500">今日目标</div>
+                  <div className="text-xs text-slate-500">总进度</div>
                 </div>
               </div>
             );
@@ -247,15 +238,10 @@ export default function Progress() {
   );
 }
 
-function StatCard({ icon, label, value, trend, trendUp }) {
+function StatCard({ icon, label, value }) {
   return (
     <div className="bg-white rounded-2xl p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-2">
-        {icon}
-        <span className={`text-xs font-semibold ${trendUp ? 'text-green-500' : 'text-red-500'}`}>
-          {trend}
-        </span>
-      </div>
+      <div className="mb-2">{icon}</div>
       <p className="text-xs text-slate-500 mb-1">{label}</p>
       <p className="text-xl font-bold text-slate-800">{value}</p>
     </div>
