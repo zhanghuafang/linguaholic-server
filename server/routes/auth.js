@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { readJSON, writeJSON, generateId } = require('../db');
+const { readStore, writeStore, generateId, seedKVIfEmpty } = require('../db');
 const { signToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -22,6 +22,12 @@ const DEFAULT_PROGRESS = {
   completedLessonKeys: [],
 };
 
+// 确保种子数据存在
+router.use(async (req, res, next) => {
+  try { await seedKVIfEmpty(); } catch {}
+  next();
+});
+
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
   try {
@@ -34,9 +40,8 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: '密码至少6位' });
     }
 
-    const users = readJSON('users.json', []);
+    const users = await readStore('users', []);
 
-    // 检查邮箱/用户名是否已存在
     if (users.find((u) => u.email === email)) {
       return res.status(400).json({ error: '该邮箱已注册' });
     }
@@ -55,12 +60,12 @@ router.post('/register', async (req, res) => {
     };
 
     users.push(newUser);
-    writeJSON('users.json', users);
+    await writeStore('users', users);
 
     // 创建初始学习进度
-    const progress = readJSON('progress.json', {});
+    const progress = await readStore('progress', {});
     progress[newUser.id] = DEFAULT_PROGRESS;
-    writeJSON('progress.json', progress);
+    await writeStore('progress', progress);
 
     const token = signToken({ id: newUser.id, username: newUser.username });
     res.json({
@@ -87,7 +92,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: '请填写邮箱和密码' });
     }
 
-    const users = readJSON('users.json', []);
+    const users = await readStore('users', []);
     const user = users.find((u) => u.email === email);
 
     if (!user) {
