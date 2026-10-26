@@ -1,0 +1,14 @@
+# Workers 配置文件
+name = "linguaholic-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# KV 存储绑定（部署前先在 Cloudflare 创建 KV namespace，把 ID 填下面）
+# 创建方法：Cloudflare Dashboard → Storage & Databases → KV → Create Namespace
+[[kv_namespaces]]
+binding = "DB"
+id = "830d85cd9b7d4b79b76b9284b19e2ef9"
+
+# JWT 密钥（部署后在 Cloudflare Dashboard → Settings → Variables 里设置）
+[vars]
+JWT_SECRET = "linguaholic-worker-dev-secret-change-me-in-prod"
