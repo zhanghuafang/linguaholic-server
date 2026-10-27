@@ -1,22 +1,16 @@
 [build]
   command = "npm run build"
   publish = "dist"
-  # 告诉 Netlify Functions 可以 require 到 server/ 目录的代码
   functions = "netlify/functions"
 
-# 所有 /api/* 请求路由到 Express function
+# API 路由 — 先匹配！/api/* → Functions
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
 
-# SPA 路由回退
+# SPA 回退 — 最后兜底（除了 /api/* 之外的都走这里）
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
-
-# Functions 打包时包含 server 目录
-[functions.api]
-  external_node_modules = ["express", "bcryptjs", "jsonwebtoken", "cors", "serverless-http"]
-  included_files = ["server/**"]

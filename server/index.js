@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 
 const authRoutes = require('./routes/auth');
 const postRoutes = require('./routes/posts');
@@ -7,6 +9,13 @@ const progressRoutes = require('./routes/progress');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// 前端静态文件 — 一体部署时 Express 同时服务前端
+const FRONTEND_DIST = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(FRONTEND_DIST)) {
+  console.log(`📦 找到前端构建产物，一起服务: ${FRONTEND_DIST}`);
+  app.use(express.static(FRONTEND_DIST));
+}
 
 // 请求日志中间件
 app.use((req, res, next) => {
@@ -39,10 +48,17 @@ app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/progress', progressRoutes);
 
-// 404
-app.use((req, res) => {
+// 404 API 路由
+app.use('/api', (req, res) => {
   res.status(404).json({ error: '接口不存在' });
 });
+
+// SPA 回退 — 所有非 API 的 GET 请求返回 index.html（React Router 接管）
+if (fs.existsSync(FRONTEND_DIST)) {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
+  });
+}
 
 // 错误处理
 app.use((err, req, res, next) => {

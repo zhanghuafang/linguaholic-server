@@ -7,11 +7,17 @@ function generateId() {
 }
 
 // ===== 检测运行环境 =====
-const IS_NETLIFY = process.env.NETLIFY === 'true' || !!process.env.NETLIFY_FUNCTIONS;
+// Netlify Functions: /var/task 路径 + NETLIFY 系列 env
+// Vercel: VERCEL=1
+const IS_NETLIFY = process.env.NETLIFY === 'true' 
+  || !!process.env.NETLIFY_FUNCTIONS 
+  || !!process.env.NETLIFY_BUILD 
+  || __dirname.includes('/var/task')
+  || __dirname.includes('\\var\\task');
 const IS_VERCEL = process.env.VERCEL === '1';
 const IS_SERVERLESS = IS_NETLIFY || IS_VERCEL;
 
-console.log(`📦 存储模式: ${IS_NETLIFY ? 'Netlify Blobs' : IS_VERCEL ? 'Vercel KV' : '本地 JSON'}`);
+console.log(`📦 存储模式: ${IS_NETLIFY ? 'Netlify Serverless' : IS_VERCEL ? 'Vercel KV' : '本地 JSON'} (IS_SERVERLESS=${IS_SERVERLESS}, dir=${__dirname})`);
 
 // ===== 种子帖子 =====
 const SEED_POSTS = [
@@ -22,10 +28,16 @@ const SEED_POSTS = [
 
 // ===== 模式 1: 本地 JSON =====
 const DATA_DIR = path.join(__dirname, 'data');
-if (!IS_SERVERLESS && !fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(path.join(DATA_DIR, 'posts.json'), JSON.stringify(SEED_POSTS, null, 2), 'utf-8');
-  console.log('🌱 种子数据已写入 posts.json');
+if (!IS_SERVERLESS) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(path.join(DATA_DIR, 'posts.json'), JSON.stringify(SEED_POSTS, null, 2), 'utf-8');
+      console.log('🌱 种子数据已写入 posts.json');
+    }
+  } catch (e) {
+    console.warn('⚠️ 本地存储不可用，跳过:', e.message);
+  }
 }
 
 function readJSON(filename, defaultValue = []) {
@@ -48,28 +60,37 @@ function writeJSON(filename, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
-// ===== 模式 2 & 3: Serverless (Vercel KV 或 Netlify Blobs) =====
-// 统一用一个 async key-value 接口，底层由环境决定
+// ===== 模式 2 & 3: Serverless (Vercel KV / Netlify Blobs / 内存 fallback) =====
 let kvClient = null;
 let blobsClient = null;
+const MEMORY_STORE = {}; // Netlify Functions 内存 fallback
 
 async function initServerlessStore() {
   if (kvClient || blobsClient) return;
 
   if (IS_VERCEL) {
-    // Vercel KV
-    const { kv } = await import('@vercel/kv');
-    kvClient = kv;
-    console.log('✅ Vercel KV 就绪');
-  } else if (IS_NETLIFY) {
-    // Netlify Blobs — 用 @netlify/blobs 或 fetch REST API
     try {
-      const { store } = await import('@netlify/blobs');
-      blobsClient = store({ name: 'linguaholic-data' });
-      console.log('✅ Netlify Blobs 就绪');
+      const { kv } = await import('@vercel/kv');
+      kvClient = kv;
+      console.log('✅ Vercel KV 就绪');
+      return;
     } catch (e) {
-      console.warn('Netlify Blobs SDK 未安装，尝试用 fetch REST API:', e.message);
-      blobsClient = { viaFetch: true };
+      console.warn('Vercel KV 不可用:', e.message);
+    }
+  }
+
+  // Netlify Blobs — 优先用 SDK，不行就用 fetch REST，再不行内存
+  if (IS_NETLIFY) {
+    // 检查 NETLIFY_AUTH_TOKEN 或 NETLIFY_KV_REST_API_TOKEN
+    const restToken = process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_KV_REST_API_TOKEN;
+    const storeName = process.env.NETLIFY_KV_NAMESPACE || process.env.NETLIFY_KV_REST_API_URL?.match(/blobs\/([^\/]+)/)?.[1];
+
+    if (restToken && storeName) {
+      console.log('✅ Netlify Blobs REST API 模式');
+      blobsClient = { mode: 'rest', token: restToken, store: storeName };
+    } else {
+      console.warn('⚠️ 没有 Blobs token，使用内存存储（重启会丢数据）');
+      blobsClient = { mode: 'memory' };
     }
   }
 }
@@ -77,35 +98,29 @@ async function initServerlessStore() {
 async function serverlessRead(key, defaultValue) {
   await initServerlessStore();
 
+  // Vercel KV
   if (kvClient) {
     const data = await kvClient.get(key);
     if (data === null || data === undefined) return defaultValue;
-    if (typeof data === 'string') {
-      try { return JSON.parse(data); } catch { return defaultValue; }
-    }
+    if (typeof data === 'string') { try { return JSON.parse(data); } catch { return defaultValue; } }
     return data;
   }
 
-  if (blobsClient) {
+  // Netlify Blobs REST
+  if (blobsClient?.mode === 'rest') {
     try {
-      if (blobsClient.viaFetch) {
-        // 降级方案：用 Netlify Functions 内部 fetch
-        const resp = await fetch(`https://api.netlify.com/api/v1/blobs/${key}`, {
-          headers: { Authorization: `Bearer ${process.env.NETLIFY_AUTH_TOKEN || ''}` },
-        }).catch(() => null);
-        if (!resp || !resp.ok) return defaultValue;
-        const text = await resp.text();
-        try { return JSON.parse(text); } catch { return defaultValue; }
-      }
-      // 用 SDK
-      const data = await blobsClient.get(key, { type: 'json' });
-      return data !== null && data !== undefined ? data : defaultValue;
+      const url = `https://api.netlify.com/api/v1/blobs/${blobsClient.store}/${key}`;
+      const resp = await fetch(url, { headers: { Authorization: `Bearer ${blobsClient.token}` } });
+      if (!resp.ok) return defaultValue;
+      const text = await resp.text();
+      try { return JSON.parse(text); } catch { return defaultValue; }
     } catch (e) {
-      console.error('Serverless read error:', e.message);
-      return defaultValue;
+      console.warn('Blobs REST read 失败，fallback 内存:', e.message);
     }
   }
 
+  // 内存 fallback
+  if (MEMORY_STORE[key] !== undefined) return MEMORY_STORE[key];
   return defaultValue;
 }
 
@@ -113,27 +128,25 @@ async function serverlessWrite(key, data) {
   await initServerlessStore();
   const json = JSON.stringify(data);
 
+  // 总是写内存（冷启动后至少有数据）
+  MEMORY_STORE[key] = data;
+
+  // Vercel KV
   if (kvClient) {
-    await kvClient.set(key, json);
+    try { await kvClient.set(key, json); } catch (e) { console.warn('KV write 失败:', e.message); }
     return;
   }
 
-  if (blobsClient) {
+  // Netlify Blobs REST
+  if (blobsClient?.mode === 'rest') {
     try {
-      if (blobsClient.viaFetch) {
-        await fetch(`https://api.netlify.com/api/v1/blobs/${key}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.NETLIFY_AUTH_TOKEN || ''}`,
-          },
-          body: json,
-        }).catch(() => {});
-        return;
-      }
-      await blobsClient.set(key, json);
+      await fetch(`https://api.netlify.com/api/v1/blobs/${blobsClient.store}/${key}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${blobsClient.token}` },
+        body: json,
+      });
     } catch (e) {
-      console.error('Serverless write error:', e.message);
+      console.warn('Blobs REST write 失败:', e.message);
     }
   }
 }

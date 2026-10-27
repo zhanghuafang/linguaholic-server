@@ -31,3 +31,11 @@ server/data/*.json
 .env
 .env.local
 .env.*.local
+
+# Netlify 自动生成
+.netlify/
+netlify/functions/server/
+netlify/functions/package-lock.json
+functions.zip
+deploy.js
+*.cjs.bak
