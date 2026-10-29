@@ -60,14 +60,27 @@ function writeJSON(filename, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
-// ===== 模式 2 & 3: Serverless (Vercel KV / Netlify Blobs / 内存 fallback) =====
-let kvClient = null;
-let blobsClient = null;
-const MEMORY_STORE = {}; // Netlify Functions 内存 fallback
+// ===== 模式 2 & 3: Serverless (Netlify Blobs SDK / Vercel KV / 内存 fallback) =====
+let blobsStore = null;     // Netlify Blobs SDK store
+let kvClient = null;       // Vercel KV
+const MEMORY_STORE = {};   // 最后兜底：内存（冷启动丢数据）
 
 async function initServerlessStore() {
-  if (kvClient || blobsClient) return;
+  if (blobsStore || kvClient) return;
 
+  // 优先 Netlify Blobs SDK — 零配置、自动注入 credentials
+  if (IS_NETLIFY) {
+    try {
+      const { getStore } = await import('@netlify/blobs');
+      blobsStore = getStore('linguaholic-data');
+      console.log('✅ Netlify Blobs SDK 就绪（持久化存储）');
+      return;
+    } catch (e) {
+      console.warn('⚠️ @netlify/blobs 不可用，fallback 内存:', e.message);
+    }
+  }
+
+  // 次选 Vercel KV
   if (IS_VERCEL) {
     try {
       const { kv } = await import('@vercel/kv');
@@ -79,43 +92,32 @@ async function initServerlessStore() {
     }
   }
 
-  // Netlify Blobs — 优先用 SDK，不行就用 fetch REST，再不行内存
-  if (IS_NETLIFY) {
-    // 检查 NETLIFY_AUTH_TOKEN 或 NETLIFY_KV_REST_API_TOKEN
-    const restToken = process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_KV_REST_API_TOKEN;
-    const storeName = process.env.NETLIFY_KV_NAMESPACE || process.env.NETLIFY_KV_REST_API_URL?.match(/blobs\/([^\/]+)/)?.[1];
-
-    if (restToken && storeName) {
-      console.log('✅ Netlify Blobs REST API 模式');
-      blobsClient = { mode: 'rest', token: restToken, store: storeName };
-    } else {
-      console.warn('⚠️ 没有 Blobs token，使用内存存储（重启会丢数据）');
-      blobsClient = { mode: 'memory' };
-    }
-  }
+  console.warn('⚠️ Serverless 存储全不可用，用内存（重启会丢数据）');
 }
 
 async function serverlessRead(key, defaultValue) {
   await initServerlessStore();
 
-  // Vercel KV
-  if (kvClient) {
-    const data = await kvClient.get(key);
-    if (data === null || data === undefined) return defaultValue;
-    if (typeof data === 'string') { try { return JSON.parse(data); } catch { return defaultValue; } }
-    return data;
-  }
-
-  // Netlify Blobs REST
-  if (blobsClient?.mode === 'rest') {
+  // Netlify Blobs SDK
+  if (blobsStore) {
     try {
-      const url = `https://api.netlify.com/api/v1/blobs/${blobsClient.store}/${key}`;
-      const resp = await fetch(url, { headers: { Authorization: `Bearer ${blobsClient.token}` } });
-      if (!resp.ok) return defaultValue;
-      const text = await resp.text();
+      const text = await blobsStore.get(key, { type: 'text' });
+      if (text === null || text === undefined) return defaultValue;
       try { return JSON.parse(text); } catch { return defaultValue; }
     } catch (e) {
-      console.warn('Blobs REST read 失败，fallback 内存:', e.message);
+      console.warn('Blobs read 失败，fallback 内存:', e.message);
+    }
+  }
+
+  // Vercel KV
+  if (kvClient) {
+    try {
+      const data = await kvClient.get(key);
+      if (data === null || data === undefined) return defaultValue;
+      if (typeof data === 'string') { try { return JSON.parse(data); } catch { return defaultValue; } }
+      return data;
+    } catch (e) {
+      console.warn('KV read 失败:', e.message);
     }
   }
 
@@ -128,26 +130,22 @@ async function serverlessWrite(key, data) {
   await initServerlessStore();
   const json = JSON.stringify(data);
 
-  // 总是写内存（冷启动后至少有数据）
+  // 永远先写内存（同实例内的后续请求立即可用）
   MEMORY_STORE[key] = data;
+
+  // Netlify Blobs SDK
+  if (blobsStore) {
+    try {
+      await blobsStore.set(key, json);
+      return;
+    } catch (e) {
+      console.warn('Blobs write 失败:', e.message);
+    }
+  }
 
   // Vercel KV
   if (kvClient) {
     try { await kvClient.set(key, json); } catch (e) { console.warn('KV write 失败:', e.message); }
-    return;
-  }
-
-  // Netlify Blobs REST
-  if (blobsClient?.mode === 'rest') {
-    try {
-      await fetch(`https://api.netlify.com/api/v1/blobs/${blobsClient.store}/${key}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${blobsClient.token}` },
-        body: json,
-      });
-    } catch (e) {
-      console.warn('Blobs REST write 失败:', e.message);
-    }
   }
 }
 

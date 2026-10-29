@@ -2,10 +2,11 @@
   "name": "linguaholic-functions",
   "private": true,
   "dependencies": {
-    "express": "^4.21.0",
+    "@netlify/blobs": "^11.1.7",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
     "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
     "serverless-http": "^3.2.0"
   }
 }
